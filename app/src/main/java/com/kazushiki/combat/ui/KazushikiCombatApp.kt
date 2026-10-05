@@ -89,6 +89,8 @@ private data class WorkoutLaunch(
     val equipment: String
 )
 
+private val equipmentOptions = listOf("NONE", "HEAVY BAG", "JUMP ROPE", "DUMBBELLS", "FULL GYM")
+
 private val fightStyles = listOf(
     FightStyle(
         "BOXING",
@@ -308,7 +310,9 @@ private fun TrainScreen(onStartWorkout: (FightStyle, Int, String) -> Unit) {
             selectedDuration = selectedDuration,
             selectedEquipment = selectedEquipment,
             onDurationChange = { selectedDuration = it },
-            onEquipmentChange = { selectedEquipment = it },
+            onEquipmentChange = { tapped ->
+                selectedEquipment = toggleEquipmentSelection(selectedEquipment, tapped)
+            },
             onBack = { selectedStyle = null },
             onStart = { onStartWorkout(selectedStyle!!, selectedDuration, selectedEquipment) }
         )
@@ -377,7 +381,6 @@ private fun TrainingSetupScreen(
     onStart: () -> Unit
 ) {
     val durations = listOf(10, 20, 30, 45, 60)
-    val equipment = listOf("NONE", "HEAVY BAG", "JUMP ROPE", "DUMBBELLS", "FULL GYM")
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -398,7 +401,7 @@ private fun TrainingSetupScreen(
             ScreenHeader(
                 eyebrow = style.name,
                 title = "BUILD YOUR SESSION.",
-                subtitle = "Choose how long you want to train and what equipment you have available."
+                subtitle = "Choose how long you want to train and all equipment you have available."
             )
         }
 
@@ -431,12 +434,21 @@ private fun TrainingSetupScreen(
             }
         }
 
-        item { SectionLabel("EQUIPMENT") }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SectionLabel("EQUIPMENT · SELECT ALL THAT APPLY")
+                Text(
+                    "None clears your gear. Full Gym represents access to everything.",
+                    color = KazushikiMuted,
+                    fontSize = 12.sp
+                )
+            }
+        }
 
-        items(equipment) { item ->
+        items(equipmentOptions) { item ->
             SelectionCard(
                 text = item,
-                selected = selectedEquipment == item,
+                selected = isEquipmentSelected(selectedEquipment, item),
                 onClick = { onEquipmentChange(item) }
             )
         }
@@ -453,6 +465,27 @@ private fun TrainingSetupScreen(
             }
         }
     }
+}
+
+private fun toggleEquipmentSelection(current: String, tapped: String): String {
+    if (tapped == "NONE") return "NONE"
+    if (tapped == "FULL GYM") return if (current == "FULL GYM") "NONE" else "FULL GYM"
+
+    val selected = current
+        .split(" + ")
+        .filter { it.isNotBlank() && it != "NONE" && it != "FULL GYM" }
+        .toMutableSet()
+
+    if (!selected.add(tapped)) selected.remove(tapped)
+
+    val ordered = equipmentOptions.filter { it in selected && it != "NONE" && it != "FULL GYM" }
+    return if (ordered.isEmpty()) "NONE" else ordered.joinToString(" + ")
+}
+
+private fun isEquipmentSelected(selection: String, option: String): Boolean {
+    if (option == "NONE") return selection == "NONE"
+    if (option == "FULL GYM") return selection == "FULL GYM"
+    return selection.split(" + ").contains(option)
 }
 
 @Composable
