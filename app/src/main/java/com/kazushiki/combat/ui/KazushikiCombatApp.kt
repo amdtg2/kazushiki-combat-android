@@ -83,6 +83,12 @@ private data class FightStyle(
     val drills: List<String>
 )
 
+private data class WorkoutLaunch(
+    val style: FightStyle,
+    val duration: Int,
+    val equipment: String
+)
+
 private val fightStyles = listOf(
     FightStyle(
         "BOXING",
@@ -111,6 +117,24 @@ fun KazushikiCombatApp() {
     var selected by remember { mutableStateOf(MainTab.Home) }
     var sessionCount by remember { mutableIntStateOf(0) }
     var totalMinutes by remember { mutableIntStateOf(0) }
+    var activeWorkout by remember { mutableStateOf<WorkoutLaunch?>(null) }
+
+    activeWorkout?.let { launch ->
+        GuidedWorkoutFlow(
+            styleName = launch.style.name,
+            drillNames = launch.style.drills,
+            durationMinutes = launch.duration,
+            equipment = launch.equipment,
+            onExit = { activeWorkout = null },
+            onCompleted = {
+                sessionCount += 1
+                totalMinutes += launch.duration
+                activeWorkout = null
+                selected = MainTab.Progress
+            }
+        )
+        return
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -147,10 +171,8 @@ fun KazushikiCombatApp() {
                 )
 
                 MainTab.Train -> TrainScreen(
-                    onSessionCompleted = { minutes ->
-                        sessionCount += 1
-                        totalMinutes += minutes
-                        selected = MainTab.Progress
+                    onStartWorkout = { style, duration, equipment ->
+                        activeWorkout = WorkoutLaunch(style, duration, equipment)
                     }
                 )
 
@@ -275,22 +297,10 @@ private fun MiniFeature(value: String, label: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun TrainScreen(onSessionCompleted: (Int) -> Unit) {
+private fun TrainScreen(onStartWorkout: (FightStyle, Int, String) -> Unit) {
     var selectedStyle by remember { mutableStateOf<FightStyle?>(null) }
     var selectedDuration by remember { mutableIntStateOf(20) }
     var selectedEquipment by remember { mutableStateOf("NONE") }
-    var workoutStarted by remember { mutableStateOf(false) }
-
-    if (workoutStarted && selectedStyle != null) {
-        WorkoutScreen(
-            style = selectedStyle!!,
-            duration = selectedDuration,
-            equipment = selectedEquipment,
-            onBack = { workoutStarted = false },
-            onComplete = { onSessionCompleted(selectedDuration) }
-        )
-        return
-    }
 
     if (selectedStyle != null) {
         TrainingSetupScreen(
@@ -300,7 +310,7 @@ private fun TrainScreen(onSessionCompleted: (Int) -> Unit) {
             onDurationChange = { selectedDuration = it },
             onEquipmentChange = { selectedEquipment = it },
             onBack = { selectedStyle = null },
-            onStart = { workoutStarted = true }
+            onStart = { onStartWorkout(selectedStyle!!, selectedDuration, selectedEquipment) }
         )
         return
     }
@@ -502,76 +512,6 @@ private fun SelectionCard(text: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun WorkoutScreen(
-    style: FightStyle,
-    duration: Int,
-    equipment: String,
-    onBack: () -> Unit,
-    onComplete: () -> Unit
-) {
-    val rounds = when {
-        duration <= 10 -> 3
-        duration <= 20 -> 4
-        duration <= 30 -> 5
-        duration <= 45 -> 6
-        else -> 7
-    }
-    val drills = List(rounds) { index -> style.drills[index % style.drills.size] }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Button(
-                onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = KazushikiSurfaceAlt),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("‹ EDIT WORKOUT", color = KazushikiWarmWhite, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        item {
-            ScreenHeader(
-                eyebrow = "${style.name} · $duration MIN",
-                title = "TODAY'S WORK.",
-                subtitle = if (equipment == "NONE") "No equipment. Just space to move." else "Equipment: $equipment"
-            )
-        }
-
-        items(drills.size) { index ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = KazushikiSurface),
-                border = BorderStroke(1.dp, Color(0xFF303034)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Text("ROUND ${index + 1}", color = KazushikiRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(drills[index], color = KazushikiWarmWhite, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.height(5.dp))
-                    Text("Stay relaxed, sharp, and technically clean.", color = KazushikiMuted, fontSize = 13.sp)
-                }
-            }
-        }
-
-        item {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onComplete,
-                colors = ButtonDefaults.buttonColors(containerColor = KazushikiRed),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(vertical = 15.dp)
-            ) {
-                Text("COMPLETE SESSION", fontWeight = FontWeight.Black, fontSize = 16.sp)
-            }
-        }
-    }
-}
-
-@Composable
 private fun CoachScreen() {
     val messages = remember {
         mutableStateListOf(
@@ -735,11 +675,7 @@ private fun ProgressScreen(sessionCount: Int, totalMinutes: Int) {
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("THIS WEEK", color = KazushikiWarmWhite, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Text(
-                        "$sessionCount of $weeklyGoal training sessions",
-                        color = KazushikiMuted,
-                        fontSize = 14.sp
-                    )
+                    Text("$sessionCount of $weeklyGoal training sessions", color = KazushikiMuted, fontSize = 14.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         repeat(weeklyGoal) { index ->
                             Box(
