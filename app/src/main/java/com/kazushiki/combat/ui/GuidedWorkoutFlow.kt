@@ -548,32 +548,53 @@ private fun buildGuidedBlocks(drills: List<String>, durationMinutes: Int, equipm
     val secondsPerBlock = (workTotal / blockCount).coerceAtLeast(45)
 
     return List(blockCount) { index ->
-        val name = drills[index % drills.size]
+        val baseName = drills[index % drills.size]
+        val adjustedName = equipmentAdjustedName(baseName, equipment, index)
         GuidedBlock(
-            name = equipmentAdjustedName(name, equipment, index),
-            cue = cueFor(name, equipment),
+            name = adjustedName,
+            cue = cueFor(adjustedName, equipment),
             durationSeconds = secondsPerBlock,
             restAfterSeconds = if (index < blockCount - 1) restSeconds else 0
         )
     }
 }
 
+private fun selectedEquipment(equipment: String): Set<String> {
+    if (equipment == "NONE") return emptySet()
+    if (equipment == "FULL GYM") return setOf("FULL GYM")
+    return equipment.split(" + ").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+}
+
 private fun equipmentAdjustedName(name: String, equipment: String, index: Int): String {
-    return when (equipment) {
-        "HEAVY BAG" -> if (index % 2 == 0) "$name · BAG" else name
-        "JUMP ROPE" -> if (index == 0) "Boxer-Step Rope Warmup" else name
-        "DUMBBELLS" -> if (index == 0) "Fighter Strength Circuit" else name
-        "FULL GYM" -> if (index == 0) "Cardio + Rotation Warmup" else name
-        else -> name
+    val selected = selectedEquipment(equipment)
+
+    if ("FULL GYM" in selected) {
+        return when (index) {
+            0 -> "Cardio + Rotation Warmup"
+            1 -> "Fighter Strength Circuit"
+            else -> if (index % 2 == 0) "$name · BAG" else name
+        }
     }
+
+    if ("JUMP ROPE" in selected && index == 0) return "Boxer-Step Rope Warmup"
+
+    val dumbbellIndex = if ("JUMP ROPE" in selected) 1 else 0
+    if ("DUMBBELLS" in selected && index == dumbbellIndex) return "Fighter Strength Circuit"
+
+    if ("HEAVY BAG" in selected && index % 2 == 0) return "$name · BAG"
+
+    return name
 }
 
 private fun cueFor(name: String, equipment: String): String {
+    val selected = selectedEquipment(equipment)
     if (name.contains("Rope", ignoreCase = true)) return "Stay light on the feet and keep the shoulders relaxed."
     if (name.contains("Strength", ignoreCase = true) || name.contains("Rotation", ignoreCase = true)) {
         return "Move with control and keep your fighting stance connected."
     }
-    if (equipment == "HEAVY BAG") return "Touch the bag clean, recover your guard, then reset your stance."
+    if (name.endsWith("· BAG") || "HEAVY BAG" in selected || "FULL GYM" in selected) {
+        return "Touch the bag clean, recover your guard, then reset your stance."
+    }
     if (name.contains("Kick", ignoreCase = true) || name.contains("Teep", ignoreCase = true)) {
         return "Stay balanced on the support leg and return to stance after every kick."
     }
