@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.kazushiki.combat"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.kazushiki.combat"
