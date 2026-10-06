@@ -110,10 +110,12 @@ fun GuidedWorkoutFlow(
                     paused = false
                 }
             }
+
             WorkoutStage.REST -> {
                 if (blockIndex < blocks.lastIndex) loadDrill(blockIndex + 1)
                 else stage = WorkoutStage.COMPLETE
             }
+
             WorkoutStage.COMPLETE -> Unit
         }
     }
@@ -195,7 +197,7 @@ fun GuidedWorkoutFlow(
                     fontSize = 14.sp
                 )
                 Text(
-                    "BLOCK ${blockIndex + 1} OF ${blocks.size}",
+                    "ROUND ${blockIndex + 1} OF ${blocks.size}",
                     color = KazushikiMuted,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
@@ -220,8 +222,6 @@ fun GuidedWorkoutFlow(
             color = KazushikiRed,
             trackColor = KazushikiSurfaceAlt
         )
-
-        Spacer(Modifier.height(4.dp))
 
         Card(
             modifier = Modifier
@@ -453,7 +453,7 @@ private fun WorkoutPreview(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
-                    Text("BLOCK ${index + 1}", color = KazushikiRed, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("ROUND ${index + 1}", color = KazushikiRed, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(Modifier.height(6.dp))
                     Text(block.name, color = KazushikiWarmWhite, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Spacer(Modifier.height(5.dp))
@@ -503,7 +503,7 @@ private fun WorkoutComplete(
         Text("WORK DONE.", color = KazushikiWarmWhite, fontSize = 38.sp, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(10.dp))
         Text(
-            "$blockCount blocks · $durationMinutes min session",
+            "$blockCount rounds · $durationMinutes min session",
             color = KazushikiMuted,
             fontSize = 15.sp
         )
@@ -531,21 +531,18 @@ private fun WorkoutComplete(
 }
 
 private fun buildGuidedBlocks(drills: List<String>, durationMinutes: Int, equipment: String): List<GuidedBlock> {
-    val blockCount = when {
-        durationMinutes <= 10 -> 3
-        durationMinutes <= 20 -> 4
-        durationMinutes <= 30 -> 5
-        durationMinutes <= 45 -> 6
-        else -> 7
-    }
-    val restSeconds = when {
-        durationMinutes <= 20 -> 30
-        durationMinutes <= 45 -> 45
-        else -> 60
-    }
-    val restTotal = restSeconds * (blockCount - 1)
-    val workTotal = (durationMinutes * 60 - restTotal).coerceAtLeast(blockCount * 45)
-    val secondsPerBlock = (workTotal / blockCount).coerceAtLeast(45)
+    val targetSeconds = durationMinutes * 60
+    val standardWorkSeconds = 120
+    val standardRestSeconds = 30
+
+    // Mirror the iOS training rhythm: short, repeatable rounds rather than stretching
+    // a single combination to 7–8 minutes. The available Quick Train durations are
+    // all multiples of 2.5 minutes, so this produces an exact session length.
+    val blockCount = (targetSeconds / (standardWorkSeconds + standardRestSeconds)).coerceAtLeast(1)
+    val restTotal = standardRestSeconds * (blockCount - 1)
+    val workBudget = (targetSeconds - restTotal).coerceAtLeast(standardWorkSeconds)
+    val finalWorkSeconds = (workBudget - standardWorkSeconds * (blockCount - 1))
+        .coerceIn(60, 180)
 
     return List(blockCount) { index ->
         val baseName = drills[index % drills.size]
@@ -553,8 +550,8 @@ private fun buildGuidedBlocks(drills: List<String>, durationMinutes: Int, equipm
         GuidedBlock(
             name = adjustedName,
             cue = cueFor(adjustedName, equipment),
-            durationSeconds = secondsPerBlock,
-            restAfterSeconds = if (index < blockCount - 1) restSeconds else 0
+            durationSeconds = if (index == blockCount - 1) finalWorkSeconds else standardWorkSeconds,
+            restAfterSeconds = if (index < blockCount - 1) standardRestSeconds else 0
         )
     }
 }
