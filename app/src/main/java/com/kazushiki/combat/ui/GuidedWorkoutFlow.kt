@@ -379,8 +379,15 @@ fun GuidedWorkoutFlow(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 modifier = Modifier.weight(1f),
-                onClick = { paused = !paused },
-                enabled = !showTechnique,
+                onClick = {
+                    if (showTechnique) {
+                        showTechnique = false
+                        paused = false
+                        resumeAfterTechnique = false
+                    } else {
+                        paused = !paused
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = KazushikiSurfaceAlt),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(vertical = 14.dp)
