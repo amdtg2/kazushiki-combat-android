@@ -59,11 +59,13 @@ fun GuidedWorkoutFlow(
     drillNames: List<String>,
     durationMinutes: Int,
     equipment: String,
+    sessionLabel: String? = null,
+    restSecondsOverride: Int? = null,
     onExit: () -> Unit,
     onCompleted: () -> Unit
 ) {
-    val blocks = remember(styleName, drillNames, durationMinutes, equipment) {
-        buildGuidedBlocks(drillNames, durationMinutes, equipment)
+    val blocks = remember(styleName, drillNames, durationMinutes, equipment, restSecondsOverride) {
+        buildGuidedBlocks(drillNames, durationMinutes, equipment, restSecondsOverride)
     }
 
     var started by remember { mutableStateOf(false) }
@@ -135,6 +137,7 @@ fun GuidedWorkoutFlow(
             styleName = styleName,
             durationMinutes = durationMinutes,
             equipment = equipment,
+            sessionLabel = sessionLabel,
             blocks = blocks,
             onExit = onExit,
             onStart = {
@@ -191,10 +194,11 @@ fun GuidedWorkoutFlow(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "$styleName QUICK TRAIN",
+                    sessionLabel?.uppercase() ?: "$styleName QUICK TRAIN",
                     color = KazushikiWarmWhite,
                     fontWeight = FontWeight.Black,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
                 )
                 Text(
                     "ROUND ${blockIndex + 1} OF ${blocks.size}",
@@ -414,6 +418,7 @@ private fun WorkoutPreview(
     styleName: String,
     durationMinutes: Int,
     equipment: String,
+    sessionLabel: String?,
     blocks: List<GuidedBlock>,
     onExit: () -> Unit,
     onStart: () -> Unit
@@ -444,10 +449,15 @@ private fun WorkoutPreview(
                 letterSpacing = 1.3.sp
             )
             Spacer(Modifier.height(5.dp))
-            Text("TODAY'S WORK.", color = KazushikiWarmWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text(
+                sessionLabel ?: "TODAY'S WORK.",
+                color = KazushikiWarmWhite,
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Black
+            )
             Spacer(Modifier.height(5.dp))
             Text(
-                if (equipment == "NONE") "No equipment. Just space to move." else "Equipment: $equipment",
+                if (equipment == "NONE") "No equipment required for this setup." else "Equipment: $equipment",
                 color = KazushikiMuted,
                 fontSize = 14.sp
             )
@@ -537,19 +547,31 @@ private fun WorkoutComplete(
     }
 }
 
-private fun buildGuidedBlocks(drills: List<String>, durationMinutes: Int, equipment: String): List<GuidedBlock> {
+private fun buildGuidedBlocks(
+    drills: List<String>,
+    durationMinutes: Int,
+    equipment: String,
+    restSecondsOverride: Int?
+): List<GuidedBlock> {
+    if (drills.isEmpty()) return emptyList()
+
     val targetSeconds = durationMinutes * 60
     val standardWorkSeconds = 120
-    val standardRestSeconds = 30
+    val standardRestSeconds = restSecondsOverride?.coerceIn(15, 60) ?: 30
 
-    // Mirror the iOS training rhythm: short, repeatable rounds rather than stretching
-    // a single combination to 7–8 minutes. The available Quick Train durations are
-    // all multiples of 2.5 minutes, so this produces an exact session length.
-    val blockCount = (targetSeconds / (standardWorkSeconds + standardRestSeconds)).coerceAtLeast(1)
-    val restTotal = standardRestSeconds * (blockCount - 1)
-    val workBudget = (targetSeconds - restTotal).coerceAtLeast(standardWorkSeconds)
-    val finalWorkSeconds = (workBudget - standardWorkSeconds * (blockCount - 1))
-        .coerceIn(60, 180)
+    // Keep the iOS-style rhythm of short repeatable drills. Choose enough rounds
+    // that the final work interval stays between one and three minutes while the
+    // total work + rest time still lands on the requested session duration.
+    var blockCount = ((targetSeconds + standardRestSeconds) /
+        (standardWorkSeconds + standardRestSeconds)).coerceAtLeast(1)
+
+    fun finalWorkSeconds(count: Int): Int =
+        targetSeconds - (standardRestSeconds * (count - 1)) - (standardWorkSeconds * (count - 1))
+
+    while (finalWorkSeconds(blockCount) > 180) blockCount += 1
+    while (blockCount > 1 && finalWorkSeconds(blockCount) < 60) blockCount -= 1
+
+    val finalWork = finalWorkSeconds(blockCount).coerceAtLeast(60)
 
     return List(blockCount) { index ->
         val baseName = drills[index % drills.size]
@@ -557,7 +579,7 @@ private fun buildGuidedBlocks(drills: List<String>, durationMinutes: Int, equipm
         GuidedBlock(
             name = adjustedName,
             cue = cueFor(adjustedName, equipment),
-            durationSeconds = if (index == blockCount - 1) finalWorkSeconds else standardWorkSeconds,
+            durationSeconds = if (index == blockCount - 1) finalWork else standardWorkSeconds,
             restAfterSeconds = if (index < blockCount - 1) standardRestSeconds else 0
         )
     }
