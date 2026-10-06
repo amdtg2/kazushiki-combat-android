@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -75,6 +76,8 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     Progress("Progress", Icons.Filled.BarChart)
 }
 
+private enum class TrainRoute { HUB, QUICK_TRAIN, PROGRAMS }
+
 private data class CoachBubble(val fromCoach: Boolean, val text: String)
 
 private data class FightStyle(
@@ -84,9 +87,14 @@ private data class FightStyle(
 )
 
 private data class WorkoutLaunch(
-    val style: FightStyle,
+    val styleName: String,
+    val drillNames: List<String>,
     val duration: Int,
-    val equipment: String
+    val equipment: String,
+    val sessionLabel: String? = null,
+    val restSecondsOverride: Int? = null,
+    val programId: String? = null,
+    val programSessionId: String? = null
 )
 
 private val equipmentOptions = listOf("NONE", "HEAVY BAG", "JUMP ROPE", "DUMBBELLS", "FULL GYM")
@@ -116,23 +124,39 @@ private val fightStyles = listOf(
 
 @Composable
 fun KazushikiCombatApp() {
+    val context = LocalContext.current
+    val programStore = remember { ProgramProgressStore(context.applicationContext) }
+
     var selected by remember { mutableStateOf(MainTab.Home) }
+    var trainRoute by remember { mutableStateOf(TrainRoute.HUB) }
+    var programEntryId by remember { mutableStateOf<String?>(null) }
     var sessionCount by remember { mutableIntStateOf(0) }
     var totalMinutes by remember { mutableIntStateOf(0) }
     var activeWorkout by remember { mutableStateOf<WorkoutLaunch?>(null) }
 
     activeWorkout?.let { launch ->
         GuidedWorkoutFlow(
-            styleName = launch.style.name,
-            drillNames = launch.style.drills,
+            styleName = launch.styleName,
+            drillNames = launch.drillNames,
             durationMinutes = launch.duration,
             equipment = launch.equipment,
+            sessionLabel = launch.sessionLabel,
+            restSecondsOverride = launch.restSecondsOverride,
             onExit = { activeWorkout = null },
             onCompleted = {
                 sessionCount += 1
                 totalMinutes += launch.duration
+                launch.programSessionId?.let(programStore::complete)
                 activeWorkout = null
-                selected = MainTab.Progress
+
+                if (launch.programSessionId != null) {
+                    selected = MainTab.Train
+                    trainRoute = TrainRoute.PROGRAMS
+                    programEntryId = launch.programId
+                } else {
+                    selected = MainTab.Progress
+                    trainRoute = TrainRoute.HUB
+                }
             }
         )
         return
@@ -146,7 +170,13 @@ fun KazushikiCombatApp() {
                 MainTab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = selected == tab,
-                        onClick = { selected = tab },
+                        onClick = {
+                            if (tab == MainTab.Train && selected != MainTab.Train) {
+                                trainRoute = TrainRoute.HUB
+                                programEntryId = null
+                            }
+                            selected = tab
+                        },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
                         label = { Text(tab.label) },
                         colors = NavigationBarItemDefaults.colors(
@@ -168,15 +198,58 @@ fun KazushikiCombatApp() {
         ) {
             when (selected) {
                 MainTab.Home -> HomeScreen(
-                    onTrain = { selected = MainTab.Train },
+                    onTrain = {
+                        selected = MainTab.Train
+                        trainRoute = TrainRoute.HUB
+                        programEntryId = null
+                    },
                     onCoach = { selected = MainTab.Coach }
                 )
 
-                MainTab.Train -> TrainScreen(
-                    onStartWorkout = { style, duration, equipment ->
-                        activeWorkout = WorkoutLaunch(style, duration, equipment)
-                    }
-                )
+                MainTab.Train -> when (trainRoute) {
+                    TrainRoute.HUB -> TrainingHubScreen(
+                        programStore = programStore,
+                        onQuickTrain = { trainRoute = TrainRoute.QUICK_TRAIN },
+                        onPrograms = { programId ->
+                            programEntryId = programId
+                            trainRoute = TrainRoute.PROGRAMS
+                        }
+                    )
+
+                    TrainRoute.QUICK_TRAIN -> TrainScreen(
+                        onBackToHub = { trainRoute = TrainRoute.HUB },
+                        onStartWorkout = { style, duration, equipment ->
+                            activeWorkout = WorkoutLaunch(
+                                styleName = style.name,
+                                drillNames = style.drills,
+                                duration = duration,
+                                equipment = equipment
+                            )
+                        }
+                    )
+
+                    TrainRoute.PROGRAMS -> ProgramsScreen(
+                        programStore = programStore,
+                        initialProgramId = programEntryId,
+                        onBackToHub = {
+                            programEntryId = null
+                            trainRoute = TrainRoute.HUB
+                        },
+                        onStartSession = { program, week, session ->
+                            programEntryId = program.id
+                            activeWorkout = WorkoutLaunch(
+                                styleName = program.styleName,
+                                drillNames = session.drillNames,
+                                duration = session.durationMinutes,
+                                equipment = "NONE",
+                                sessionLabel = "${program.title} • ${session.title}",
+                                restSecondsOverride = session.restAfterSeconds,
+                                programId = program.id,
+                                programSessionId = session.id
+                            )
+                        }
+                    )
+                }
 
                 MainTab.Coach -> CoachScreen()
                 MainTab.Progress -> ProgressScreen(sessionCount = sessionCount, totalMinutes = totalMinutes)
@@ -228,8 +301,8 @@ private fun HomeScreen(onTrain: () -> Unit, onCoach: () -> Unit) {
 
         item {
             ActionCard(
-                title = "QUICK TRAIN",
-                body = "Build a focused striking session around your style, time, and equipment.",
+                title = "TRAIN",
+                body = "Build a Quick Train session or follow a structured 12-session program.",
                 button = "START TRAINING",
                 onClick = onTrain
             )
@@ -247,7 +320,7 @@ private fun HomeScreen(onTrain: () -> Unit, onCoach: () -> Unit) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 MiniFeature("4", "FIGHT STYLES", Modifier.weight(1f))
-                MiniFeature("10–60", "MIN SESSIONS", Modifier.weight(1f))
+                MiniFeature("12", "PROGRAM SESSIONS", Modifier.weight(1f))
             }
         }
     }
@@ -299,7 +372,10 @@ private fun MiniFeature(value: String, label: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun TrainScreen(onStartWorkout: (FightStyle, Int, String) -> Unit) {
+private fun TrainScreen(
+    onBackToHub: () -> Unit,
+    onStartWorkout: (FightStyle, Int, String) -> Unit
+) {
     var selectedStyle by remember { mutableStateOf<FightStyle?>(null) }
     var selectedDuration by remember { mutableIntStateOf(20) }
     var selectedEquipment by remember { mutableStateOf("NONE") }
@@ -325,8 +401,18 @@ private fun TrainScreen(onStartWorkout: (FightStyle, Int, String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
+            Button(
+                onClick = onBackToHub,
+                colors = ButtonDefaults.buttonColors(containerColor = KazushikiSurfaceAlt),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("‹ TRAIN", color = KazushikiWarmWhite, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        item {
             ScreenHeader(
-                eyebrow = "Train",
+                eyebrow = "Quick Train",
                 title = "CHOOSE YOUR STYLE.",
                 subtitle = "Pick your striking style, then build a quick session around your time and equipment."
             )
@@ -749,7 +835,7 @@ private fun ProgressScreen(sessionCount: Int, totalMinutes: Int) {
                     Spacer(Modifier.height(7.dp))
                     Text(
                         if (sessionCount == 0)
-                            "Complete your first Quick Train session and your activity will start showing up here."
+                            "Complete your first training session and your activity will start showing up here."
                         else
                             "Nice work. Your latest training session has been added to your totals.",
                         color = KazushikiMuted,
